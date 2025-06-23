@@ -33,7 +33,6 @@ pipeline {
         REPO_URL        = 'https://github.com/LevKesha/peakyblinders.git'
         REGISTRY_PREFIX = 'docker.io/keshagold'
         TAG             = "${env.BUILD_NUMBER}"
-        GIT_SHA         = "${env.GIT_COMMIT?.take(7) ?: 'dev'}"
         COMPOSE_FILE    = 'infra/docker-compose.yml'
         GIT_SHA         = 'dev'        // will be overwritten in Set GIT_SHA stage
     }
