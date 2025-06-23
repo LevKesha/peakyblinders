@@ -1,36 +1,38 @@
 pipeline {
 /*─────────────────────────────────────────────
-  0. Top-level agent – runs Docker-in-Docker
+  0. Top-level agent – Docker-in-Docker
 ─────────────────────────────────────────────*/
     agent {
         docker {
-            image 'peakyblinders/ci-toolchain:latest'   // pre-baked tool-chain
+            image 'peakyblinders/ci-toolchain:latest'
             args  '-v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
-    options  { timestamps() }
-    triggers { githubPush() }                           // build every push
-
-/*─────────────────────────────────────────────
-  1. Global vars & credentials
-─────────────────────────────────────────────*/
-    environment {
-        REGISTRY      = 'docker.io/peakyblinders'       // change to GHCR/ECR if needed
-        TAG           = "${env.BUILD_NUMBER}"           // unique, reproducible tag
-        COMPOSE_FILE  = 'infra/docker-compose.yml'
-        // export short Git SHA for “latest-but-immutable” tag if desired
-        GIT_SHA       = "${env.GIT_COMMIT?.take(7) ?: 'dev'}"
+    /*──── Build parameters – NOT persisted as credentials ────*/
+    parameters {
+        string  (name: 'DOCKERHUB_USR', defaultValue: 'levkesha',
+                 description: 'Docker Hub user (kept only in this build)')
+        password(name: 'Dorcom!2025',
+                 description: 'Docker Hub PAT / password (masked, not stored)')
     }
 
-    /* map Docker Hub creds to env.USER / env.PASS */
-    // store the credential under “dockerhub-peaky” in Jenkins
+    options  { timestamps() }
+    triggers { githubPush() }
 
+    /*──── Global env ────*/
+    environment {
+        REPO_URL     = 'https://github.com/LevKesha/peakyblinders.git'
+        REGISTRY     = 'docker.io/peakyblinders'
+        TAG          = "${env.BUILD_NUMBER}"
+        GIT_SHA      = "${env.GIT_COMMIT?.take(7) ?: 'dev'}"
+        COMPOSE_FILE = 'infra/docker-compose.yml'
+    }
 
     stages {
 
 /*─────────────────────────────────────────────
-  2. (Optional) one-time bootstrap if image is bare
+  1. (optional) bootstrap tools
 ─────────────────────────────────────────────*/
         stage('Bootstrap Tool-chain') {
             when { expression { !fileExists('/.toolchain_ready') } }
@@ -48,7 +50,7 @@ pipeline {
         }
 
 /*─────────────────────────────────────────────
-  3. Clone each service branch in parallel
+  2. Clone micro-service branches in parallel
 ─────────────────────────────────────────────*/
         stage('Clone Code') {
             parallel {
@@ -61,7 +63,7 @@ pipeline {
         }
 
 /*─────────────────────────────────────────────
-  4. Resolve build-time dependencies
+  3. Resolve build-time dependencies
 ─────────────────────────────────────────────*/
         stage('Check Requirements') {
             parallel {
@@ -74,7 +76,7 @@ pipeline {
         }
 
 /*─────────────────────────────────────────────
-  5. Build all images (fan-out)
+  4. Build Docker images
 ─────────────────────────────────────────────*/
         stage('Build Docker Images') {
             parallel {
@@ -97,43 +99,46 @@ pipeline {
         }
 
 /*─────────────────────────────────────────────
-  6. Push (needs registry credentials)
+  5. Push to registry – user types creds per run
 ─────────────────────────────────────────────*/
         stage('Push to Registry') {
             when { anyOf { branch 'main'; branch 'master'; branch 'release/*' } }
 
-    /* “docker login” once, then fan-out with real parallel sub-stages */
             stages {
                 stage('Login') {
+                    /* inject parameters as env vars only inside this block */
                     steps {
-                        withCredentials([usernamePassword(credentialsId: 'dockerhub-peaky',
-                                  usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                         sh 'echo "$PASS" | docker login -u "$USER" --password-stdin'
+                        withEnv(["USR=${params.DOCKERHUB_USR}",
+                                 "PSW=${params.DOCKERHUB_PSW}"]) {
+                            sh '''
+                                set +x
+                                printf "%s" "$PSW" | \
+                                  docker login -u "$USR" --password-stdin
+                            '''
+                        }
+                    }
+                }
+
+                stage('Push Images') {
+                    parallel {
+                        stage('Push Frontend')   { steps { sh "docker push ${REGISTRY}/frontend:${TAG}          && docker push ${REGISTRY}/frontend:${GIT_SHA}" } }
+                        stage('Push Gateway')    { steps { sh "docker push ${REGISTRY}/api-gateway:${TAG}       && docker push ${REGISTRY}/api-gateway:${GIT_SHA}" } }
+                        stage('Push User-Svc')   { steps { sh "docker push ${REGISTRY}/user-service:${TAG}      && docker push ${REGISTRY}/user-service:${GIT_SHA}" } }
+                        stage('Push Inventory')  { steps { sh "docker push ${REGISTRY}/inventory-service:${TAG} && docker push ${REGISTRY}/inventory-service:${GIT_SHA}" } }
+                        stage('Push DB')         { steps { sh "docker push ${REGISTRY}/db:${TAG}                && docker push ${REGISTRY}/db:${GIT_SHA}" } }
+                    }
                 }
             }
         }
 
-        stage('Push Images') {
-            parallel {
-                stage('Push Frontend')   { steps { sh "docker push ${REGISTRY}/frontend:${TAG}          && docker push ${REGISTRY}/frontend:${GIT_SHA}" } }
-                stage('Push Gateway')    { steps { sh "docker push ${REGISTRY}/api-gateway:${TAG}       && docker push ${REGISTRY}/api-gateway:${GIT_SHA}" } }
-                stage('Push User-Svc')   { steps { sh "docker push ${REGISTRY}/user-service:${TAG}      && docker push ${REGISTRY}/user-service:${GIT_SHA}" } }
-                stage('Push Inventory')  { steps { sh "docker push ${REGISTRY}/inventory-service:${TAG} && docker push ${REGISTRY}/inventory-service:${GIT_SHA}" } }
-                stage('Push DB')         { steps { sh "docker push ${REGISTRY}/db:${TAG}                && docker push ${REGISTRY}/db:${GIT_SHA}" } }
-            }
-        }
-    }
-}
-
 /*─────────────────────────────────────────────
-  7. Integration test with docker-compose
+  6. Integration test (docker-compose)
 ─────────────────────────────────────────────*/
         stage('Integration Test') {
             steps {
                 sh """
                     if [ -f ${COMPOSE_FILE} ]; then
-                        docker compose -f ${COMPOSE_FILE} \
-                                       --pull never \
+                        docker compose -f ${COMPOSE_FILE} --pull never \
                                        up -d --force-recreate
                         ./test.sh
                     else
@@ -144,7 +149,7 @@ pipeline {
         }
 
 /*─────────────────────────────────────────────
-  8. (Optional) Deploy
+  7. Deploy (example)
 ─────────────────────────────────────────────*/
         stage('Deploy (prod)') {
             when { branch 'main' }
@@ -158,10 +163,10 @@ pipeline {
                 }
             }
         }
-    }
+    } /* stages */
 
 /*─────────────────────────────────────────────
-  9. Post-build cleanup
+  8. Post-build cleanup
 ─────────────────────────────────────────────*/
     post {
         always {
@@ -173,7 +178,7 @@ pipeline {
             """
             cleanWs()
         }
-        success { echo "SUCCESS – images tagged ${TAG} + ${GIT_SHA}" }
-        failure { echo "FAILURE – check pipeline log" }
+        success { echo "✅  SUCCESS – images tagged ${TAG} + ${GIT_SHA}" }
+        failure { echo "❌  FAILURE – check pipeline log" }
     }
 }
