@@ -126,19 +126,7 @@ pipeline {
                     }
                 }
                 /* Java ─────────────────────────────*/
-                stage('inventory deps') {
-                    steps {
-                        dir('inventory-service') {
-                            script {
-                                if (fileExists('pom.xml')) {
-                                    sh 'mvn -q dependency:resolve'
-                                } else {
-                                    echo '⚠️  inventory-service skipped: no pom.xml'
-                                }
-                            }
-                        }
-                    }
-                }
+
                 /* DB ───────────────────────────────*/
                 stage('db deps') {
                     steps { dir('database') { sh 'psql --version' } }
