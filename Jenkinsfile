@@ -15,7 +15,7 @@ pipeline {
     parameters {
         string  (name: 'DOCKERHUB_USR', defaultValue: 'keshagold',
                  description: 'Docker Hub username')
-        password(name: 'DOCKERHUB_PSW',                   ←☚ fixed name
+        password(name: 'DOCKERHUB_PSW',
                  description: 'Docker Hub PAT / password (masked)')
     }
 
