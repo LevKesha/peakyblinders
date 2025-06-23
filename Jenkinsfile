@@ -1,16 +1,18 @@
 pipeline {
 /*─────────────────────────────────────────────
-  0. Top-level agent – Docker-in-Docker
+  GLOBAL DOCKER AGENT  (all stages *after* Prep run in here)
 ─────────────────────────────────────────────*/
     agent {
         docker {
             image 'keshagold/peaky:ci-toolchain-latest'
             args  '-v /var/run/docker.sock:/var/run/docker.sock'
-            // registryCredentialsId 'dockerhub-keshagold'
+            // registryCredentialsId 'dockerhub-keshagold'   // if repo is private
         }
     }
 
-    /*──────── Build-time parameters ────────*/
+/*─────────────────────────────────────────────
+  PARAMETERS / OPTIONS
+─────────────────────────────────────────────*/
     parameters {
         string  (name: 'DOCKERHUB_USR', defaultValue: 'keshagold',
                  description: 'Docker Hub username')
@@ -18,12 +20,15 @@ pipeline {
                  description: 'Docker Hub PAT / password (masked)')
     }
 
-    options  { timestamps()
-cleanWs(deleteDirs: true, disableDeferredWipeout: true)
-}
+    options  {
+        timestamps()               // keep timestamps
+        skipDefaultCheckout()      // we do git clone manually
+    }
     triggers { githubPush() }
 
-    /*──────── Global env ────────*/
+/*─────────────────────────────────────────────
+  GLOBAL ENV
+─────────────────────────────────────────────*/
     environment {
         REPO_URL        = 'https://github.com/LevKesha/peakyblinders.git'
         REGISTRY_PREFIX = 'docker.io/keshagold'
@@ -32,12 +37,21 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
         COMPOSE_FILE    = 'infra/docker-compose.yml'
     }
 
-    /*────────────────────────────────────────
-      STAGES
-    ────────────────────────────────────────*/
+/*─────────────────────────────────────────────
+  STAGES
+─────────────────────────────────────────────*/
     stages {
 
-    /* 2. clone each branch in parallel */
+    /* 0. FULL CLEAN BEFORE CONTAINER STARTS */
+        stage('Prep Workspace') {
+            // run on the Jenkins node itself (no docker block here)
+            agent { label '' }
+            steps {
+                cleanWs(deleteDirs: true, disableDeferredWipeout: true)
+            }
+        }
+
+    /* 1. Clone code inside the Docker agent */
         stage('Clone Code') {
             parallel {
                 stage('frontend')    { steps { sh "git clone --depth 1 --branch frontend-dev    ${REPO_URL} frontend" } }
@@ -48,20 +62,18 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
             }
         }
 
-    /* 3. dependency resolution */
+    /* 2. Resolve build-time dependencies */
         stage('Check Requirements') {
             parallel {
-      /* Node ─────────────────────────────────*/
+                /* Node ─────────────────────────────*/
                 stage('frontend deps') {
                     steps {
                         dir('frontend') {
                             script {
                                 if (fileExists('package.json')) {
-                                    if (fileExists('package-lock.json')) {
-                                        sh 'npm ci --loglevel=error'
-                                    } else {
-                                        sh 'npm install --loglevel=error'
-                                    }
+                                    sh (fileExists('package-lock.json') ?
+                                        'npm ci --loglevel=error' :
+                                        'npm install --loglevel=error')
                                 } else {
                                     echo '⚠️  frontend skipped: no package.json'
                                 }
@@ -74,11 +86,9 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
                         dir('api-gateway') {
                             script {
                                 if (fileExists('package.json')) {
-                                    if (fileExists('package-lock.json')) {
-                                        sh 'npm ci --loglevel=error'
-                                    } else {
-                                        sh 'npm install --loglevel=error'
-                                    }
+                                    sh (fileExists('package-lock.json') ?
+                                        'npm ci --loglevel=error' :
+                                        'npm install --loglevel=error')
                                 } else {
                                     echo '⚠️  api-gateway skipped: no package.json'
                                 }
@@ -86,7 +96,7 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
                         }
                     }
                 }
-      /* Python ──────────────────────────────*/
+                /* Python ───────────────────────────*/
                 stage('user-svc deps') {
                     steps {
                         retry(3) {
@@ -96,7 +106,7 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
                         }
                     }
                 }
-      /* Java ────────────────────────────────*/
+                /* Java ─────────────────────────────*/
                 stage('inventory deps') {
                     steps {
                         dir('inventory-service') {
@@ -110,14 +120,14 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
                         }
                     }
                 }
-      /* DB  ─────────────────────────────────*/
+                /* DB ───────────────────────────────*/
                 stage('db deps') {
                     steps { dir('database') { sh 'psql --version' } }
                 }
             }
         }
 
-    /* 4. build images */
+    /* 3. Build Docker images */
         stage('Build Docker Images') {
             parallel {
                 stage('frontend img') {
@@ -168,17 +178,14 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
             }
         }
 
-    /* 5. push images (only on main/release) */
+    /* 4. Push images (main / release branches) */
         stage('Push to Registry') {
             when { anyOf { branch 'main'; branch 'master'; branch pattern: 'release/.+' } }
             stages {
                 stage('Login') {
                     steps {
                         withEnv(["USR=${params.DOCKERHUB_USR}", "PSW=${params.DOCKERHUB_PSW}"]) {
-                            sh '''
-                              set +x
-                              printf "%s" "$PSW" | docker login -u "$USR" --password-stdin
-                            '''
+                            sh 'set +x && printf "%s" "$PSW" | docker login -u "$USR" --password-stdin'
                         }
                     }
                 }
@@ -194,7 +201,7 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
             }
         }
 
-    /* 6. integration test */
+    /* 5. Integration test */
         stage('Integration Test') {
             steps {
                 sh """
@@ -208,7 +215,7 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
             }
         }
 
-    /* 7. deploy */
+    /* 6. Deploy (main) */
         stage('Deploy (prod)') {
             when { branch 'main' }
             steps {
@@ -221,11 +228,11 @@ cleanWs(deleteDirs: true, disableDeferredWipeout: true)
                 }
             }
         }
-    } /* end stages */
+    } /* stages */
 
-    /*────────────────────────────────────────
-      POST
-    ────────────────────────────────────────*/
+/*─────────────────────────────────────────────
+  POST
+─────────────────────────────────────────────*/
     post {
         always {
             sh '''
