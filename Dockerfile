@@ -2,7 +2,7 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps         # same cmd Jenkins runs
+RUN npm install --legacy-peer-depsgit
 COPY . .
 RUN npm run build                     # e.g. generates /dist
 
