@@ -39,20 +39,6 @@ pipeline {
 /*─────────────────────────────────────────────
   1. (Optional) install extra tools if image is bare
 ─────────────────────────────────────────────*/
-        stage('Bootstrap Tool-chain') {
-            when { expression { !fileExists('/.toolchain_ready') } }
-            steps {
-                sh '''
-                  set -e
-                  echo "Tool-chain missing – installing once ..."
-                  apt-get update -qq
-                  DEBIAN_FRONTEND=noninteractive \
-                  apt-get install -y --no-install-recommends \
-                        nodejs npm python3-pip maven postgresql-client
-                  touch /.toolchain_ready
-                '''
-            }
-        }
 
 /*─────────────────────────────────────────────
   2. Clone micro-service branches in parallel
@@ -208,8 +194,8 @@ pipeline {
               if [ -f "$COMPOSE_FILE" ]; then
                   docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
               fi
-              docker logout || true
             '''
+            sh 'docker logout || true'
             cleanWs()
         }
         success { echo "✅  SUCCESS – images tagged $TAG and $GIT_SHA" }
