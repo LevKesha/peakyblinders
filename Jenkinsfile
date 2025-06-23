@@ -207,8 +207,8 @@ pipeline {
         }
 
     /* 5. Integration test */
+        def composeFile = 'infra-dev/infra/docker-compose.yml'
         stage('Integration Test') {
-            def composeFile = 'infra-dev/infra/docker-compose.yml'
             steps {
                 sh """
                   if [ -f ${COMPOSE_FILE} ]; then
