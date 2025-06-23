@@ -148,6 +148,10 @@ pipeline {
 
     /* 3. Build Docker images */
         stage('Build Docker Images') {
+            environment {
+                 // writable config dir for the docker CLI
+                  DOCKER_CONFIG = "${env.WORKSPACE}/.docker"
+    }
             parallel {
                 stage('frontend img') {
                     steps {
