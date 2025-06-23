@@ -6,7 +6,7 @@ pipeline {
         docker {
             image 'keshagold/peaky:ci-toolchain-latest'
             args  '-v /var/run/docker.sock:/var/run/docker.sock'
-            // registryCredentialsId 'dockerhub-keshagold'   // if repo is private
+            // registryCredentialsId 'dockerhub-keshagold'
         }
     }
 
@@ -30,66 +30,65 @@ pipeline {
         COMPOSE_FILE    = 'infra/docker-compose.yml'
     }
 
-    /* Clone Code … */
-
+    /*────────────────────────────────────────
+      STAGES
+    ────────────────────────────────────────*/
     stages {
+    /* 1. clean workspace first */
         stage('Prep Workspace') {
-        steps {
-            // remove everything from the previous build
-            deleteDir()                // built-in Pipeline step
+            steps { deleteDir() }
         }
 
-/*─────────────────────────────────────────────
-  1. Clone micro-service branches (parallel)
-─────────────────────────────────────────────*/
+    /* 2. clone each branch in parallel */
         stage('Clone Code') {
             parallel {
-                stage('frontend')    { steps { sh "git clone --branch frontend-dev       ${REPO_URL} frontend"          } }
-                stage('api-gateway') { steps { sh "git clone --branch api-gateway-dev    ${REPO_URL} api-gateway"       } }
-                stage('user-service'){ steps { sh "git clone --branch user-service-dev   ${REPO_URL} user-service"      } }
-                stage('inventory')   { steps { sh "git clone --branch inventory-dev      ${REPO_URL} inventory-service" } }
-                stage('database')    { steps { sh "git clone --branch database-dev       ${REPO_URL} database"          } }
+                stage('frontend')    { steps { sh "git clone --depth 1 --branch frontend-dev    ${REPO_URL} frontend" } }
+                stage('api-gateway') { steps { sh "git clone --depth 1 --branch api-gateway-dev ${REPO_URL} api-gateway" } }
+                stage('user-service'){ steps { sh "git clone --depth 1 --branch user-service-dev ${REPO_URL} user-service" } }
+                stage('inventory')   { steps { sh "git clone --depth 1 --branch inventory-dev   ${REPO_URL} inventory-service" } }
+                stage('database')    { steps { sh "git clone --depth 1 --branch database-dev    ${REPO_URL} database" } }
             }
         }
 
-/*─────────────────────────────────────────────
-  2. Resolve build-time dependencies
-─────────────────────────────────────────────*/
+    /* 3. dependency resolution */
         stage('Check Requirements') {
             parallel {
-                /*---- Node projects ----*/
-stage('frontend deps') {
-    steps {
-        dir('frontend') {
-            script {
-                if (fileExists('package.json')) {
-                    if (fileExists('package-lock.json')) {
-                        sh 'npm ci --loglevel=error'
-                    } else {
-                        sh 'npm install --loglevel=error'
-                    }
-                } else {
-                    echo '⚠️  frontend skipped: no package.json'
-                }
-            }
-        }
-    }
-}
-                stage('gateway deps') {
+      /* Node ─────────────────────────────────*/
+                stage('frontend deps') {
                     steps {
-                        dir('api-gateway') {
+                        dir('frontend') {
                             script {
-                                if (fileExists('package-lock.json') || fileExists('npm-shrinkwrap.json')) {
-                                    sh 'npm ci --loglevel=error'
+                                if (fileExists('package.json')) {
+                                    if (fileExists('package-lock.json')) {
+                                        sh 'npm ci --loglevel=error'
+                                    } else {
+                                        sh 'npm install --loglevel=error'
+                                    }
                                 } else {
-                                    sh 'npm install --loglevel=error'
+                                    echo '⚠️  frontend skipped: no package.json'
                                 }
                             }
                         }
                     }
                 }
-
-                /*---- Python service ----*/
+                stage('gateway deps') {
+                    steps {
+                        dir('api-gateway') {
+                            script {
+                                if (fileExists('package.json')) {
+                                    if (fileExists('package-lock.json')) {
+                                        sh 'npm ci --loglevel=error'
+                                    } else {
+                                        sh 'npm install --loglevel=error'
+                                    }
+                                } else {
+                                    echo '⚠️  api-gateway skipped: no package.json'
+                                }
+                            }
+                        }
+                    }
+                }
+      /* Python ──────────────────────────────*/
                 stage('user-svc deps') {
                     steps {
                         retry(3) {
@@ -99,32 +98,28 @@ stage('frontend deps') {
                         }
                     }
                 }
-
-                /*---- Java service ----*/
-stage('inventory deps') {
-    steps {
-        dir('inventory-service') {
-            script {
-                if (fileExists('pom.xml')) {
-                    sh 'mvn -q dependency:resolve'
-                } else {
-                    echo '⚠️  inventory-service skipped: no pom.xml'
+      /* Java ────────────────────────────────*/
+                stage('inventory deps') {
+                    steps {
+                        dir('inventory-service') {
+                            script {
+                                if (fileExists('pom.xml')) {
+                                    sh 'mvn -q dependency:resolve'
+                                } else {
+                                    echo '⚠️  inventory-service skipped: no pom.xml'
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        }
-    }
-}
-
-                /*---- DB scripts ----*/
+      /* DB  ─────────────────────────────────*/
                 stage('db deps') {
                     steps { dir('database') { sh 'psql --version' } }
                 }
             }
         }
 
-/*─────────────────────────────────────────────
-  3. Build Docker images
-─────────────────────────────────────────────*/
+    /* 4. build images */
         stage('Build Docker Images') {
             parallel {
                 stage('frontend img') {
@@ -175,12 +170,9 @@ stage('inventory deps') {
             }
         }
 
-/*─────────────────────────────────────────────
-  4. Push images (typed creds)
-─────────────────────────────────────────────*/
+    /* 5. push images (only on main/release) */
         stage('Push to Registry') {
-            when { anyOf { branch 'main'; branch 'master'; branch 'release/*' } }
-
+            when { anyOf { branch 'main'; branch 'master'; branch pattern: 'release/.+' } }
             stages {
                 stage('Login') {
                     steps {
@@ -192,22 +184,19 @@ stage('inventory deps') {
                         }
                     }
                 }
-
                 stage('Push Images') {
                     parallel {
-                        stage('Push Frontend')  { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-frontend:${TAG}  && docker push ${REGISTRY_PREFIX}/peaky-frontend:${GIT_SHA}" } }
-                        stage('Push Gateway')   { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-gateway:${TAG}   && docker push ${REGISTRY_PREFIX}/peaky-gateway:${GIT_SHA}" } }
-                        stage('Push UserSvc')   { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-user-svc:${TAG}  && docker push ${REGISTRY_PREFIX}/peaky-user-svc:${GIT_SHA}" } }
-                        stage('Push Inventory') { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-inventory:${TAG} && docker push ${REGISTRY_PREFIX}/peaky-inventory:${GIT_SHA}" } }
-                        stage('Push DB')        { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-db:${TAG}       && docker push ${REGISTRY_PREFIX}/peaky-db:${GIT_SHA}" } }
+                        stage('Push Frontend')  { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-frontend:${TAG}"  } }
+                        stage('Push Gateway')   { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-gateway:${TAG}"   } }
+                        stage('Push UserSvc')   { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-user-svc:${TAG}" } }
+                        stage('Push Inventory') { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-inventory:${TAG}" } }
+                        stage('Push DB')        { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-db:${TAG}"       } }
                     }
                 }
             }
         }
 
-/*─────────────────────────────────────────────
-  5. Integration test (docker-compose)
-─────────────────────────────────────────────*/
+    /* 6. integration test */
         stage('Integration Test') {
             steps {
                 sh """
@@ -221,9 +210,7 @@ stage('inventory deps') {
             }
         }
 
-/*─────────────────────────────────────────────
-  6. Deploy example
-─────────────────────────────────────────────*/
+    /* 7. deploy */
         stage('Deploy (prod)') {
             when { branch 'main' }
             steps {
@@ -236,19 +223,19 @@ stage('inventory deps') {
                 }
             }
         }
-    } /* stages */
+    } /* end stages */
 
-/*─────────────────────────────────────────────
-  7. Post-build cleanup
-─────────────────────────────────────────────*/
-post {
-    always {
-        sh '''
-          if [ -f "$COMPOSE_FILE" ]; then
-              docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
-          fi
-        '''
-        cleanWs()
+    /*────────────────────────────────────────
+      POST
+    ────────────────────────────────────────*/
+    post {
+        always {
+            sh '''
+              if [ -f "$COMPOSE_FILE" ]; then
+                  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
+              fi
+            '''
+            cleanWs()
+        }
     }
-}
 }
