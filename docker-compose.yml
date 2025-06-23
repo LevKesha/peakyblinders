@@ -20,8 +20,7 @@ services:
     image: keshagold/peaky-user-svc:dev
     container_name: user_service
     depends_on:
-      db:
-        condition: service_healthy
+      - db
     environment:
       DATABASE_URL: postgres://peaky:peaky@db:5432/peakydb
     healthcheck:
