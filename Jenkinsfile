@@ -42,6 +42,7 @@ pipeline {
         TAG             = "${env.BUILD_NUMBER}"
         COMPOSE_FILE    = 'infra/docker-compose.yml'
         GIT_SHA         = 'dev'        // will be overwritten in Set GIT_SHA stage
+        COMPOSE_FILE = 'infra/docker-compose.yml'
     }
 
 /*─────────────────────────────────────────────
@@ -207,19 +208,18 @@ pipeline {
         }
 
     /* 5. Integration test */
-        stage('Integration Test') {
-            steps {
-                def composeFile = 'infra-dev/infra/docker-compose.yml'
-                sh """
-                  if [ -f ${COMPOSE_FILE} ]; then
-                      docker compose -f ${COMPOSE_FILE} --pull never up -d --force-recreate
-                      ./test.sh
-                  else
-                      echo 'ℹ️  No compose file – skipping integration test.'
-                  fi
-                """
+stage('Integration Test') {
+    steps {
+        script {                                                 // <─ ✅ wrap Groovy
+            if (fileExists(env.COMPOSE_FILE)) {
+                sh "docker compose -f ${env.COMPOSE_FILE} --pull never up -d --force-recreate"
+                sh "./test.sh"
+            } else {
+                echo "ℹ️  No compose file – skipping integration test."
             }
         }
+    }
+}
 
     /* 6. Deploy (main) */
         stage('Deploy (prod)') {
