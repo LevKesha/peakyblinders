@@ -1,0 +1,59 @@
+# infra/docker-compose.yml
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: peaky_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: peaky
+      POSTGRES_PASSWORD: peaky
+      POSTGRES_DB: peakydb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  user-svc:
+    # during CI we run the freshly-built local image
+    image: keshagold/peaky-user-svc:dev
+    container_name: user_service
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://peaky:peaky@db:5432/peakydb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    image: keshagold/peaky-gateway:dev
+    container_name: api_gateway
+    depends_on:
+      user-svc:
+        condition: service_healthy
+    environment:
+      USER_SERVICE_URL: http://user-svc:8000
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    image: keshagold/peaky-frontend:dev
+    container_name: web_frontend
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+volumes:
+  db-data:
