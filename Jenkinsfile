@@ -31,6 +31,17 @@ pipeline {
     }
 
     stages {
+    stage('Prep Workspace') {
+        steps {
+            // remove everything from the previous build
+            deleteDir()                // built-in Pipeline step
+        }
+    }
+
+    /* Clone Code … */
+}
+
+    stages {
 
 /*─────────────────────────────────────────────
   1. Clone micro-service branches (parallel)
@@ -234,16 +245,14 @@ stage('inventory deps') {
 /*─────────────────────────────────────────────
   7. Post-build cleanup
 ─────────────────────────────────────────────*/
-    post {
-        always {
-            sh '''
-              if [ -f "$COMPOSE_FILE" ]; then
-                  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
-              fi
-            '''
-            cleanWs()
-        }
-        success { echo "✅  SUCCESS – images tagged $TAG and $GIT_SHA" }
-        failure { echo "❌  FAILURE – check pipeline log" }
+post {
+    always {
+        sh '''
+          if [ -f "$COMPOSE_FILE" ]; then
+              docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
+          fi
+        '''
+        cleanWs()
     }
+}
 }
