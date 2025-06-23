@@ -31,7 +31,6 @@ pipeline {
     }
 
     /* Clone Code … */
-}
 
     stages {
         stage('Prep Workspace') {
