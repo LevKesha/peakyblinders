@@ -2,13 +2,20 @@ pipeline {
 /*─────────────────────────────────────────────
   GLOBAL DOCKER AGENT  (all stages *after* Prep run in here)
 ─────────────────────────────────────────────*/
-agent {
-    docker {
-        image 'keshagold/peaky:ci-toolchain-20240624'
-        // pull defaults to false (only pulled when tag is absent)
-        args  '-v /var/run/docker.sock:/var/run/docker.sock'
+    agent {
+        docker {
+            /* 1️⃣  stick to a single, mutable tag … */
+            image 'keshagold/peaky:ci-toolchain-latest'
+
+            /* 2️⃣  …and tell the Docker-Pipeline plug-in to **always pull** */
+            // (works with all recent versions of the plugin)
+            alwaysPull true                // <─ this is the “force pull” switch
+
+            /* keep your existing options */
+            args  '-v /var/run/docker.sock:/var/run/docker.sock'
+            // registryCredentialsId 'dockerhub-keshagold'
+        }
     }
-}
 
 /*─────────────────────────────────────────────
   PARAMETERS / OPTIONS
