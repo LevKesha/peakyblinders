@@ -168,15 +168,7 @@ pipeline {
                         """
                     }
                 }
-                stage('inventory img') {
-                    steps {
-                        sh """
-                          docker build -t ${REGISTRY_PREFIX}/peaky-inventory:${TAG} \
-                                       -t ${REGISTRY_PREFIX}/peaky-inventory:${GIT_SHA} \
-                                       ./inventory-service
-                        """
-                    }
-                }
+
                 stage('db img') {
                     steps {
                         sh """
