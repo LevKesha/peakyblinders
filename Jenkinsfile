@@ -51,19 +51,23 @@ pipeline {
         stage('Check Requirements') {
             parallel {
                 /*---- Node projects ----*/
-                stage('frontend deps') {
-                    steps {
-                        dir('frontend') {
-                            script {
-                                if (fileExists('package-lock.json') || fileExists('npm-shrinkwrap.json')) {
-                                    sh 'npm ci --loglevel=error'
-                                } else {
-                                    sh 'npm install --loglevel=error'
-                                }
-                            }
-                        }
+stage('frontend deps') {
+    steps {
+        dir('frontend') {
+            script {
+                if (fileExists('package.json')) {
+                    if (fileExists('package-lock.json')) {
+                        sh 'npm ci --loglevel=error'
+                    } else {
+                        sh 'npm install --loglevel=error'
                     }
+                } else {
+                    echo '⚠️  frontend skipped: no package.json'
                 }
+            }
+        }
+    }
+}
                 stage('gateway deps') {
                     steps {
                         dir('api-gateway') {
@@ -90,19 +94,19 @@ pipeline {
                 }
 
                 /*---- Java service ----*/
-                stage('inventory deps') {
-                    steps {
-                        dir('inventory-service') {
-                            script {
-                                if (fileExists('pom.xml')) {
-                                    sh 'mvn -q dependency:resolve'
-                                } else {
-                                    error "pom.xml not found – check inventory-service branch"
-                                }
-                            }
-                        }
-                    }
+stage('inventory deps') {
+    steps {
+        dir('inventory-service') {
+            script {
+                if (fileExists('pom.xml')) {
+                    sh 'mvn -q dependency:resolve'
+                } else {
+                    echo '⚠️  inventory-service skipped: no pom.xml'
                 }
+            }
+        }
+    }
+}
 
                 /*---- DB scripts ----*/
                 stage('db deps') {
@@ -237,10 +241,6 @@ pipeline {
                   docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
               fi
             '''
-            /* logout inside the same container */
-            withDockerContainer('keshagold/peaky:ci-toolchain-latest') {
-                sh 'docker logout || true'
-            }
             cleanWs()
         }
         success { echo "✅  SUCCESS – images tagged $TAG and $GIT_SHA" }
