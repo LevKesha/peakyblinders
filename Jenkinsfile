@@ -40,7 +40,7 @@ pipeline {
         REPO_URL        = 'https://github.com/LevKesha/peakyblinders.git'
         REGISTRY_PREFIX = 'docker.io/keshagold'
         TAG             = "${env.BUILD_NUMBER}"
-        COMPOSE_FILE    = 'infra-dev/infra/docker-compose.yml'
+        COMPOSE_FILE = 'infra/docker-compose.yml'
         GIT_SHA         = 'dev'        // will be overwritten in Set GIT_SHA stage
     }
 
@@ -209,12 +209,14 @@ pipeline {
     /* 5. Integration test */
 stage('Integration Test') {
     steps {
-        script {                                                 // <─ ✅ wrap Groovy
+        script {
             if (fileExists(env.COMPOSE_FILE)) {
-                sh "docker compose -f ${env.COMPOSE_FILE} --pull never up -d --force-recreate"
-                sh "./test.sh"
+                sh """
+                  docker compose -f ${env.COMPOSE_FILE} --pull never up -d --force-recreate
+                  ./test.sh
+                """
             } else {
-                echo "ℹ️  No compose file – skipping integration test."
+                echo "ℹ️  No compose file (${env.COMPOSE_FILE}) – skipping integration test."
             }
         }
     }
@@ -238,14 +240,14 @@ stage('Integration Test') {
 /*─────────────────────────────────────────────
   POST
 ─────────────────────────────────────────────*/
-    post {
-        always {
-            sh '''
-              if [ -f "$COMPOSE_FILE" ]; then
-                  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
-              fi
-            '''
-            cleanWs()
-        }
+post {
+    always {
+        sh '''
+          if [ -f "$COMPOSE_FILE" ]; then
+              docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
+          fi
+        '''
+        cleanWs()
     }
+}
 }
