@@ -30,18 +30,15 @@ pipeline {
         COMPOSE_FILE    = 'infra/docker-compose.yml'
     }
 
-    stages {
-    stage('Prep Workspace') {
-        steps {
-            // remove everything from the previous build
-            deleteDir()                // built-in Pipeline step
-        }
-    }
-
     /* Clone Code … */
 }
 
     stages {
+        stage('Prep Workspace') {
+        steps {
+            // remove everything from the previous build
+            deleteDir()                // built-in Pipeline step
+        }
 
 /*─────────────────────────────────────────────
   1. Clone micro-service branches (parallel)
