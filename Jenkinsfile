@@ -207,9 +207,9 @@ pipeline {
         }
 
     /* 5. Integration test */
-        def composeFile = 'infra-dev/infra/docker-compose.yml'
         stage('Integration Test') {
             steps {
+                def composeFile = 'infra-dev/infra/docker-compose.yml'
                 sh """
                   if [ -f ${COMPOSE_FILE} ]; then
                       docker compose -f ${COMPOSE_FILE} --pull never up -d --force-recreate
