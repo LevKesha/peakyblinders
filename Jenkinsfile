@@ -42,7 +42,6 @@ pipeline {
         TAG             = "${env.BUILD_NUMBER}"
         COMPOSE_FILE    = 'infra/docker-compose.yml'
         GIT_SHA         = 'dev'        // will be overwritten in Set GIT_SHA stage
-        COMPOSE_FILE = 'infra/docker-compose.yml'
     }
 
 /*─────────────────────────────────────────────
