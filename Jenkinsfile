@@ -35,6 +35,7 @@ pipeline {
         TAG             = "${env.BUILD_NUMBER}"
         GIT_SHA         = "${env.GIT_COMMIT?.take(7) ?: 'dev'}"
         COMPOSE_FILE    = 'infra/docker-compose.yml'
+        GIT_SHA         = 'dev'        // will be overwritten in Set GIT_SHA stage
     }
 
 /*─────────────────────────────────────────────
@@ -61,6 +62,18 @@ pipeline {
                 stage('database')    { steps { sh "git clone --depth 1 --branch database-dev    ${REPO_URL} database" } }
             }
         }
+
+        stage('Set GIT_SHA') {
+        steps {
+            script {
+                // pick one of the cloned repos; here we use frontend
+                env.GIT_SHA = sh(returnStdout: true,
+                                 script: 'git -C frontend rev-parse --short HEAD'
+                                ).trim()
+                echo "GIT_SHA set to ${env.GIT_SHA}"
+            }
+        }
+    }
 
     /* 2. Resolve build-time dependencies */
         stage('Check Requirements') {
