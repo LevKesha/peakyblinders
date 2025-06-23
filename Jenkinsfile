@@ -66,7 +66,7 @@ pipeline {
                 stage('user-service'){ steps { sh "git clone --depth 1 --branch user-service-dev ${REPO_URL} user-service" } }
                 stage('inventory')   { steps { sh "git clone --depth 1 --branch inventory-dev   ${REPO_URL} inventory-service" } }
                 stage('database')    { steps { sh "git clone --depth 1 --branch database-dev    ${REPO_URL} database" } }
-                stage('infra')    { steps { sh "git clone --depth 1 --branch infra-dev    ${REPO_URL} infra-dev" } }
+                stage('infra')    { steps { sh "git clone --depth 1 --branch infra-dev    ${REPO_URL} infra" } }
 
             }
         }
