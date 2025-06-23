@@ -4,27 +4,32 @@ pipeline {
 ─────────────────────────────────────────────*/
     agent {
         docker {
-            image 'peakyblinders/ci-toolchain:latest'
+            // 👉 pulled from your Docker Hub repo
+            image 'keshagold/peaky:ci-toolchain-latest'
             args  '-v /var/run/docker.sock:/var/run/docker.sock'
+            // registryCredentialsId 'dockerhub-keshagold'  // ← only if repo is private
         }
     }
 
-    /*──── Build parameters – NOT persisted as credentials ────*/
+    /*── Build parameters (typed each run; not stored on Jenkins) ──*/
     parameters {
-        string  (name: 'DOCKERHUB_USR', defaultValue: 'levkesha',
-                 description: 'Docker Hub user (kept only in this build)')
-        password(name: 'Dorcom!2025',
-                 description: 'Docker Hub PAT / password (masked, not stored)')
+        string  (name: 'DOCKERHUB_USR', defaultValue: 'keshagold',
+                 description: 'Docker Hub username')
+        password(name: 'DOCKERHUB_PSW',                   ←☚ fixed name
+                 description: 'Docker Hub PAT / password (masked)')
     }
 
     options  { timestamps() }
     triggers { githubPush() }
 
-    /*──── Global env ────*/
+    /*── Global env ──*/
     environment {
-        REPO_URL     = 'https://github.com/LevKesha/peakyblinders.git'
-        REGISTRY     = 'docker.io/peakyblinders'
-        TAG          = "${env.BUILD_NUMBER}"
+        REPO_URL = 'https://github.com/LevKesha/peakyblinders.git'
+
+        // all micro-service images go to docker.io/keshagold
+        REGISTRY_PREFIX = 'docker.io/keshagold'
+
+        TAG          = "${env.BUILD_NUMBER}"                // unique CI tag
         GIT_SHA      = "${env.GIT_COMMIT?.take(7) ?: 'dev'}"
         COMPOSE_FILE = 'infra/docker-compose.yml'
     }
@@ -32,7 +37,7 @@ pipeline {
     stages {
 
 /*─────────────────────────────────────────────
-  1. (optional) bootstrap tools
+  1. (Optional) install extra tools if image is bare
 ─────────────────────────────────────────────*/
         stage('Bootstrap Tool-chain') {
             when { expression { !fileExists('/.toolchain_ready') } }
@@ -71,7 +76,7 @@ pipeline {
                 stage('gateway  deps')  { steps { retry(3) { dir('api-gateway')       { sh 'npm ci --loglevel=error' } } } }
                 stage('user-svc deps')  { steps { retry(3) { dir('user-service')      { sh 'pip install -q -r requirements.txt' } } } }
                 stage('inventory deps') { steps { retry(3) { dir('inventory-service') { sh 'mvn -q dependency:resolve' } } } }
-                stage('db       deps')  { steps { dir('database') { sh 'psql --version' } } }
+                stage('db deps')        { steps { dir('database') { sh 'psql --version' } } }
             }
         }
 
@@ -81,51 +86,81 @@ pipeline {
         stage('Build Docker Images') {
             parallel {
                 stage('frontend img')   {
-                    steps { sh "docker build -t ${REGISTRY}/frontend:${TAG}          -t ${REGISTRY}/frontend:${GIT_SHA}          ./frontend" }
+                    steps {
+                        sh """
+                          docker build -t ${REGISTRY_PREFIX}/peaky-frontend:${TAG} \
+                                       -t ${REGISTRY_PREFIX}/peaky-frontend:${GIT_SHA} \
+                                       ./frontend
+                        """
+                    }
                 }
                 stage('gateway img')    {
-                    steps { sh "docker build -t ${REGISTRY}/api-gateway:${TAG}       -t ${REGISTRY}/api-gateway:${GIT_SHA}       ./api-gateway" }
+                    steps {
+                        sh """
+                          docker build -t ${REGISTRY_PREFIX}/peaky-gateway:${TAG} \
+                                       -t ${REGISTRY_PREFIX}/peaky-gateway:${GIT_SHA} \
+                                       ./api-gateway
+                        """
+                    }
                 }
                 stage('user-svc img')   {
-                    steps { sh "docker build -t ${REGISTRY}/user-service:${TAG}      -t ${REGISTRY}/user-service:${GIT_SHA}      ./user-service" }
+                    steps {
+                        sh """
+                          docker build -t ${REGISTRY_PREFIX}/peaky-user-svc:${TAG} \
+                                       -t ${REGISTRY_PREFIX}/peaky-user-svc:${GIT_SHA} \
+                                       ./user-service
+                        """
+                    }
                 }
                 stage('inventory img')  {
-                    steps { sh "docker build -t ${REGISTRY}/inventory-service:${TAG} -t ${REGISTRY}/inventory-service:${GIT_SHA} ./inventory-service" }
+                    steps {
+                        sh """
+                          docker build -t ${REGISTRY_PREFIX}/peaky-inventory:${TAG} \
+                                       -t ${REGISTRY_PREFIX}/peaky-inventory:${GIT_SHA} \
+                                       ./inventory-service
+                        """
+                    }
                 }
                 stage('db img')         {
-                    steps { sh "docker build -t ${REGISTRY}/db:${TAG}                -t ${REGISTRY}/db:${GIT_SHA}                ./database" }
+                    steps {
+                        sh """
+                          docker build -t ${REGISTRY_PREFIX}/peaky-db:${TAG} \
+                                       -t ${REGISTRY_PREFIX}/peaky-db:${GIT_SHA} \
+                                       ./database
+                        """
+                    }
                 }
             }
         }
 
 /*─────────────────────────────────────────────
-  5. Push to registry – user types creds per run
+  5. Push images (type creds each run)
 ─────────────────────────────────────────────*/
         stage('Push to Registry') {
             when { anyOf { branch 'main'; branch 'master'; branch 'release/*' } }
 
             stages {
+                /*── 5a: login once ──*/
                 stage('Login') {
-                    /* inject parameters as env vars only inside this block */
                     steps {
                         withEnv(["USR=${params.DOCKERHUB_USR}",
                                  "PSW=${params.DOCKERHUB_PSW}"]) {
                             sh '''
-                                set +x
-                                printf "%s" "$PSW" | \
-                                  docker login -u "$USR" --password-stdin
+                              set +x
+                              printf "%s" "$PSW" | docker login -u "$USR" --password-stdin
                             '''
                         }
                     }
                 }
 
+                /*── 5b: push all images in parallel ──*/
                 stage('Push Images') {
                     parallel {
-                        stage('Push Frontend')   { steps { sh "docker push ${REGISTRY}/frontend:${TAG}          && docker push ${REGISTRY}/frontend:${GIT_SHA}" } }
-                        stage('Push Gateway')    { steps { sh "docker push ${REGISTRY}/api-gateway:${TAG}       && docker push ${REGISTRY}/api-gateway:${GIT_SHA}" } }
-                        stage('Push User-Svc')   { steps { sh "docker push ${REGISTRY}/user-service:${TAG}      && docker push ${REGISTRY}/user-service:${GIT_SHA}" } }
-                        stage('Push Inventory')  { steps { sh "docker push ${REGISTRY}/inventory-service:${TAG} && docker push ${REGISTRY}/inventory-service:${GIT_SHA}" } }
-                        stage('Push DB')         { steps { sh "docker push ${REGISTRY}/db:${TAG}                && docker push ${REGISTRY}/db:${GIT_SHA}" } }
+                        stage('Push Frontend')  { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-frontend:${TAG}  && docker push ${REGISTRY_PREFIX}/peaky-frontend:${GIT_SHA}" } }
+                        stage('Push Gateway')   { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-gateway:${TAG}   && docker push ${REGISTRY_PREFIX}/peaky-gateway:${GIT_SHA}" } }
+                        stage('Push UserSvc')   { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-user-svc:${TAG}  && docker push ${REGISTRY_PREFIX}/peaky-user-svc:${GIT_SHA}" } }
+                        stage('Push Inventory') { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-inventory:${TAG} && docker push ${REGISTRY_PREFIX}/peaky-inventory:${GIT_SHA}" } }
+                        stage('Push DB')        { steps { sh "docker push ${REGISTRY_PREFIX}/peaky-db:${TAG}       && docker push ${REGISTRY_PREFIX}/peaky-db:${GIT_SHA}" } }
                     }
                 }
             }
@@ -137,28 +172,27 @@ pipeline {
         stage('Integration Test') {
             steps {
                 sh """
-                    if [ -f ${COMPOSE_FILE} ]; then
-                        docker compose -f ${COMPOSE_FILE} --pull never \
-                                       up -d --force-recreate
-                        ./test.sh
-                    else
-                        echo '🛈  No compose file – skipping integration test.'
-                    fi
+                  if [ -f ${COMPOSE_FILE} ]; then
+                      docker compose -f ${COMPOSE_FILE} --pull never up -d --force-recreate
+                      ./test.sh
+                  else
+                      echo 'ℹ️  No compose file – skipping integration test.'
+                  fi
                 """
             }
         }
 
 /*─────────────────────────────────────────────
-  7. Deploy (example)
+  7. Deploy example
 ─────────────────────────────────────────────*/
         stage('Deploy (prod)') {
             when { branch 'main' }
             steps {
                 sshagent(credentials: ['ec2-key']) {
                     sh """
-                      ssh -o StrictHostKeyChecking=no ec2-user@1.2.3.4 \
-                        'docker pull ${REGISTRY}/frontend:${TAG} && \
-                         docker stack deploy -c /srv/peakyblinder/stack.yml peaky'
+                      ssh -o StrictHostKeyChecking=no ec2-user@1.2.3.4 '
+                          docker pull ${REGISTRY_PREFIX}/peaky-frontend:${TAG} &&
+                          docker stack deploy -c /srv/peakyblinder/stack.yml peaky'
                     """
                 }
             }
@@ -170,15 +204,15 @@ pipeline {
 ─────────────────────────────────────────────*/
     post {
         always {
-            sh """
-              if [ -f ${COMPOSE_FILE} ]; then
-                  docker compose -f ${COMPOSE_FILE} down -v --remove-orphans || true
+            sh '''
+              if [ -f "$COMPOSE_FILE" ]; then
+                  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
               fi
               docker logout || true
-            """
+            '''
             cleanWs()
         }
-        success { echo "✅  SUCCESS – images tagged ${TAG} + ${GIT_SHA}" }
+        success { echo "✅  SUCCESS – images tagged $TAG and $GIT_SHA" }
         failure { echo "❌  FAILURE – check pipeline log" }
     }
 }
