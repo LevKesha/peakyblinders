@@ -2,13 +2,13 @@ pipeline {
 /*─────────────────────────────────────────────
   GLOBAL DOCKER AGENT  (all stages *after* Prep run in here)
 ─────────────────────────────────────────────*/
-    agent {
-        docker {
-            image 'keshagold/peaky:ci-toolchain-latest'
-            args  '-v /var/run/docker.sock:/var/run/docker.sock'
-            // registryCredentialsId 'dockerhub-keshagold'   // if repo is private
-        }
+agent {
+    docker {
+        image 'keshagold/peaky:ci-toolchain-20240624'
+        // pull defaults to false (only pulled when tag is absent)
+        args  '-v /var/run/docker.sock:/var/run/docker.sock'
     }
+}
 
 /*─────────────────────────────────────────────
   PARAMETERS / OPTIONS
