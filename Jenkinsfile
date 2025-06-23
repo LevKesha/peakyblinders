@@ -209,16 +209,14 @@ pipeline {
     /* 5. Integration test */
 stage('Integration Test') {
     steps {
-        script {
-            if (fileExists(env.COMPOSE_FILE)) {
-                sh """
-                  docker compose -f ${env.COMPOSE_FILE} --pull never up -d --force-recreate
-                  ./test.sh
-                """
-            } else {
-                echo "ℹ️  No compose file (${env.COMPOSE_FILE}) – skipping integration test."
-            }
-        }
+        sh """
+          if [ -f ${COMPOSE_FILE} ]; then
+              docker compose -f ${COMPOSE_FILE} up -d --force-recreate
+              ./test.sh
+          else
+              echo 'ℹ️  No compose file – skipping integration test.'
+          fi
+        """
     }
 }
 
