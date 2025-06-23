@@ -25,7 +25,7 @@ pipeline {
 
     /* map Docker Hub creds to env.USER / env.PASS */
     // store the credential under “dockerhub-peaky” in Jenkins
-    tools { }   // <- leave empty; tool-chain is baked into the image
+
 
     stages {
 
@@ -101,22 +101,29 @@ pipeline {
 ─────────────────────────────────────────────*/
         stage('Push to Registry') {
             when { anyOf { branch 'main'; branch 'master'; branch 'release/*' } }
-            /* ----- docker login once, then push in parallel ---- */
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-peaky',
-                                  usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh 'echo "$PASS" | docker login -u "$USER" --password-stdin'
 
-                    parallel (
-                        "push frontend"  : { sh "docker push ${REGISTRY}/frontend:${TAG}          && docker push ${REGISTRY}/frontend:${GIT_SHA}" },
-                        "push gateway"   : { sh "docker push ${REGISTRY}/api-gateway:${TAG}       && docker push ${REGISTRY}/api-gateway:${GIT_SHA}" },
-                        "push user-svc"  : { sh "docker push ${REGISTRY}/user-service:${TAG}      && docker push ${REGISTRY}/user-service:${GIT_SHA}" },
-                        "push inventory" : { sh "docker push ${REGISTRY}/inventory-service:${TAG} && docker push ${REGISTRY}/inventory-service:${GIT_SHA}" },
-                        "push db"        : { sh "docker push ${REGISTRY}/db:${TAG}                && docker push ${REGISTRY}/db:${GIT_SHA}" }
-                    )
+    /* “docker login” once, then fan-out with real parallel sub-stages */
+            stages {
+                stage('Login') {
+                    steps {
+                        withCredentials([usernamePassword(credentialsId: 'dockerhub-peaky',
+                                  usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                         sh 'echo "$PASS" | docker login -u "$USER" --password-stdin'
                 }
             }
         }
+
+        stage('Push Images') {
+            parallel {
+                stage('Push Frontend')   { steps { sh "docker push ${REGISTRY}/frontend:${TAG}          && docker push ${REGISTRY}/frontend:${GIT_SHA}" } }
+                stage('Push Gateway')    { steps { sh "docker push ${REGISTRY}/api-gateway:${TAG}       && docker push ${REGISTRY}/api-gateway:${GIT_SHA}" } }
+                stage('Push User-Svc')   { steps { sh "docker push ${REGISTRY}/user-service:${TAG}      && docker push ${REGISTRY}/user-service:${GIT_SHA}" } }
+                stage('Push Inventory')  { steps { sh "docker push ${REGISTRY}/inventory-service:${TAG} && docker push ${REGISTRY}/inventory-service:${GIT_SHA}" } }
+                stage('Push DB')         { steps { sh "docker push ${REGISTRY}/db:${TAG}                && docker push ${REGISTRY}/db:${GIT_SHA}" } }
+            }
+        }
+    }
+}
 
 /*─────────────────────────────────────────────
   7. Integration test with docker-compose
