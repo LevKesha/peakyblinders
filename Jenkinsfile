@@ -18,7 +18,9 @@ pipeline {
                  description: 'Docker Hub PAT / password (masked)')
     }
 
-    options  { timestamps() }
+    options  { timestamps()
+cleanWs(deleteDirs: true, disableDeferredWipeout: true)
+}
     triggers { githubPush() }
 
     /*──────── Global env ────────*/
@@ -34,10 +36,6 @@ pipeline {
       STAGES
     ────────────────────────────────────────*/
     stages {
-    /* 1. clean workspace first */
-        stage('Prep Workspace') {
-            steps { deleteDir() }
-        }
 
     /* 2. clone each branch in parallel */
         stage('Clone Code') {
