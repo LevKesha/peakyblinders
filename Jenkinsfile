@@ -122,7 +122,7 @@ pipeline {
                     steps {
                         retry(3) {
                             dir('user-service') {
-                                sh 'pip install -q -r requirements.txt'
+                                ""
                             }
                         }
                     }
